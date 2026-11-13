@@ -995,16 +995,27 @@ class _AddTenantState extends State<AddTenant> {
           ),
         ),
         const SizedBox(height: 16),
-        Text(
-          'Durée du bail',
-          style: ts(13, w: FontWeight.w600, c: p.text),
+        AppSelect<int>(
+          label: 'Durée du bail',
+          icon: PI.calendarBlank,
+          value: at.dur,
+          items: [for (var d = 1; d <= 12; d++) (d, monthsLabel(d))],
+          onChanged: (d) => d == null ? null : s.setDur(d),
+        ),
+        const SizedBox(height: 16),
+        AppSelect<int>(
+          label: 'Mois offerts',
+          icon: PI.gift,
+          value: at.free,
+          items: [(0, 'Aucun'), for (var f = 1; f < at.dur; f++) (f, '${monthsLabel(f)} offert${f > 1 ? 's' : ''}')],
+          onChanged: (f) => f == null ? null : s.setFree(f),
         ),
         const SizedBox(height: 8),
-        ChipRow(
-          wrap: true,
-          children: [
-            for (final d in const [6, 12, 24]) ChoiceChipX('$d mois', selected: at.dur == d, onTap: () => s.set(() => at.dur = d)),
-          ],
+        Text(
+          at.dur == 1
+              ? 'Un bail d’un mois ne peut pas comporter de mois offert.'
+              : 'Les mois offerts sont les premiers du bail : le locataire ne paie pas de loyer pendant cette période.',
+          style: ts(13, w: FontWeight.w500, c: p.text2, h: 1.4),
         ),
         const SizedBox(height: 20),
         Container(
@@ -1030,9 +1041,19 @@ class _AddTenantState extends State<AddTenant> {
                 style: ts(14, w: FontWeight.w500, c: p.text2),
               ),
               Text(
-                'Durée : ${at.dur} mois',
+                'Durée : ${monthsLabel(at.dur)} (${leaseMonths[0]} – ${leaseMonths[at.dur - 1]})',
                 style: ts(14, w: FontWeight.w500, c: p.text2),
               ),
+              if (at.free > 0) ...[
+                Text(
+                  freeLabel(at.free),
+                  style: ts(14, w: FontWeight.w600, c: p.a800),
+                ),
+                Text(
+                  'Premier loyer à payer : ${leaseMonths[at.free]}',
+                  style: ts(14, w: FontWeight.w500, c: p.text2),
+                ),
+              ],
             ],
           ),
         ),
@@ -1050,7 +1071,9 @@ class _AddTenantState extends State<AddTenant> {
         ),
         const SizedBox(height: 10),
         Text(
-          'La chambre ${at.room} est attribuée à $firstName. Un SMS l’invite à installer MaCité et à se connecter avec son numéro $phoneShow.',
+          'La chambre ${at.room} est attribuée à $firstName pour ${monthsLabel(at.dur)}'
+          '${at.free > 0 ? ', dont ${monthsLabel(at.free)} offert${at.free > 1 ? 's' : ''}' : ''}. '
+          'Un SMS l’invite à installer MaCité et à se connecter avec son numéro $phoneShow.',
           textAlign: TextAlign.center,
           style: ts(16, c: p.text2, h: 1.5),
         ),

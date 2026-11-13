@@ -185,7 +185,18 @@ const urgStyle = {
   'low': ('Faible', Tone.muted, PI.cellSignalLow),
 };
 const repStatus = {'new': ('Nouveau', Tone.neutral, PI.sparkle), 'doing': ('En cours', Tone.neutral, PI.wrench), 'done': ('Résolu', Tone.paid, PI.checkCircle)};
-const techs = ['Non assigné', 'Alain (électricien)', 'Bruno (plombier)', 'Joseph K. (gardien)'];
+
+/// Technicien (artisan, gardien…) à qui le bailleur confie les signalements.
+class Tech {
+  Tech(this.name, this.job, this.phone);
+  final String name, job, phone;
+
+  /// Libellé affiché et enregistré sur le signalement : « Bruno (plombier) ».
+  String get label => '$name (${job.toLowerCase()})';
+  String get initials => initialsOf(name);
+}
+
+const techJobs = ['Électricien', 'Plombier', 'Serrurier', 'Menuisier', 'Peintre', 'Maçon', 'Gardien', 'Agent d’entretien', 'Autre'];
 const annTypes = [
   ('water', 'Coupure d’eau', PI.drop),
   ('power', 'Coupure d’électricité', PI.lightning),
@@ -518,7 +529,35 @@ class AddTenantState {
   String name = '', phone = '', idn = '';
   String room = '';
   int dur = 12;
+
+  /// Mois offerts par le bailleur au début du bail (0 = aucun).
+  int free = 0;
   bool err = false;
+}
+
+/// Mois du bail, à partir de la date d'entrée (1 décembre 2026).
+const leaseMonths = [
+  'décembre 2026',
+  'janvier 2027',
+  'février 2027',
+  'mars 2027',
+  'avril 2027',
+  'mai 2027',
+  'juin 2027',
+  'juillet 2027',
+  'août 2027',
+  'septembre 2027',
+  'octobre 2027',
+  'novembre 2027',
+];
+
+String monthsLabel(int n) => '$n mois';
+
+/// Résumé des mois offerts : « 1 mois offert (décembre 2026) ».
+String freeLabel(int free) {
+  if (free <= 0) return 'Aucun mois offert';
+  final range = free == 1 ? leaseMonths[0] : '${leaseMonths[0]} – ${leaseMonths[free - 1]}';
+  return '${monthsLabel(free)} offert${free > 1 ? 's' : ''} ($range)';
 }
 
 /// État du formulaire de chambre.
@@ -550,6 +589,11 @@ class LandlordStore extends ChangeNotifier {
   final notes = <String, String>{'dk': 'Préfère être contacté par message après 18 h.'};
   String bSel = 'A', roomSel = 'A-102';
   final reports = _seedReports();
+  final techList = <Tech>[
+    Tech('Alain', 'Électricien', '07 12 00 00 11'),
+    Tech('Bruno', 'Plombier', '07 12 00 00 12'),
+    Tech('Joseph K.', 'Gardien', '07 12 00 00 02'),
+  ];
   String repSel = 's1', rTab = 'new';
   final anns = <Ann>[
     const Ann('Coupure d’eau jeudi', 'De 9 h à 12 h dans l’immeuble A. Pensez à faire vos réserves.', 'Immeuble A', 'Hier', PI.drop, '14/16 lus'),
@@ -829,6 +873,18 @@ class LandlordStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Durée du bail : les mois offerts restent inférieurs à la durée (au moins un mois payé).
+  void setDur(int d) {
+    at.dur = d;
+    if (at.free >= d) at.free = d - 1;
+    notifyListeners();
+  }
+
+  void setFree(int f) {
+    at.free = f.clamp(0, at.dur - 1);
+    notifyListeners();
+  }
+
   void atBack() {
     if (at.step == 1) {
       go(const ['addTenant', 'soon'].contains(prev) ? 'tenants' : prev);
@@ -853,6 +909,35 @@ class LandlordStore extends ChangeNotifier {
     rep.st = st;
     notifyListeners();
     toast('Statut : ${repStatus[st]!.$1} · ${rep.tenantName} est notifié(e)');
+  }
+
+  /// Choix proposés sur un signalement.
+  List<String> get techs => ['Non assigné', for (final t in techList) t.label];
+
+  /// Interventions en cours (signalements non résolus) d'un technicien.
+  int activeJobs(Tech t) => reports.where((r) => r.tech == t.label && r.st != 'done').length;
+
+  bool hasTech(String name, String job) => techList.any((t) => t.label == Tech(name.trim(), job, '').label);
+
+  void addTech(String name, String job, String phone, {bool assign = false}) {
+    final t = Tech(name.trim(), job, phone.trim());
+    techList.add(t);
+    if (assign) {
+      setTech(t.label); // prévient aussi par un message
+    } else {
+      notifyListeners();
+      toast('${t.label} ajouté à vos techniciens');
+    }
+  }
+
+  /// Retire un technicien ; ses interventions en cours redeviennent « Non assigné ».
+  void removeTech(Tech t) {
+    techList.remove(t);
+    for (final r in reports) {
+      if (r.tech == t.label && r.st != 'done') r.tech = '';
+    }
+    notifyListeners();
+    toast('${t.name} retiré de vos techniciens');
   }
 
   void setTech(String t) {

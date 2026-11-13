@@ -508,7 +508,7 @@ class Segmented<T> extends StatelessWidget {
                   height: height,
                   decoration: BoxDecoration(
                     color: o.$1 == value ? p.card : Colors.transparent,
-                    borderRadius: AppRadius.r,
+                    borderRadius: AppRadius.rs,
                     boxShadow: o.$1 == value ? AppShadows.sm : null,
                   ),
                   alignment: Alignment.center,

@@ -56,8 +56,11 @@ class AppSpacing {
 }
 
 class AppRadius {
-  static const sm = 1.0, md = 2.0, lg = 4.0;
+  // Coins arrondis (demande client) : 12 px pour cadres, boutons, champs et onglets ;
+  // 8 px pour l'onglet actif posé dans une piste ; 20 px pour le haut des feuilles du bas.
+  static const sm = 8.0, md = 12.0, lg = 20.0;
   static const r = BorderRadius.all(Radius.circular(md));
+  static const rs = BorderRadius.all(Radius.circular(sm));
 }
 
 class AppShadows {

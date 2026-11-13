@@ -1,0 +1,566 @@
+================================================================================
+  MaCité — Endpoints API nécessaires au backend
+  Version 1 · 13 novembre 2026
+================================================================================
+
+Ce document liste les appels HTTP dont l'application Flutter MaCité a besoin
+pour remplacer ses données de démonstration (aujourd'hui en mémoire dans
+lib/features/*/..._store.dart) par un vrai serveur.
+
+Chaque endpoint indique : la méthode, le chemin, qui peut l'appeler, ce qu'il
+reçoit et ce qu'il renvoie, et l'écran de l'app qui l'utilise.
+
+
+--------------------------------------------------------------------------------
+0. CONVENTIONS GÉNÉRALES
+--------------------------------------------------------------------------------
+
+URL de base      https://<domaine>/api/v1
+Format           JSON (UTF-8). Envoi de fichiers : multipart/form-data.
+Authentification En-tête  Authorization: Bearer <access_token>
+                 (sauf les endpoints marqués « public »).
+Rôles            LANDLORD (bailleur) · TENANT (locataire).
+                 Un bailleur ne voit que SA cité ; un locataire ne voit que
+                 SES données et celles de SA cité.
+Montants         Entiers en FCFA (ex. 45000), jamais de décimales.
+Dates            ISO 8601 (ex. "2026-11-04T09:12:00Z", "2026-12-01").
+                 L'app se charge de l'affichage en français (« 4 nov. »).
+Téléphones       Chaîne de chiffres sans espaces (ex. "0712345602").
+                 L'app accepte les espaces à la saisie et les retire avant envoi.
+Mois             Format "AAAA-MM" (ex. "2026-11") pour les loyers.
+Pagination       ?page=1&per_page=20  →  { "items": [...], "page": 1,
+                 "per_page": 20, "total": 48 }
+Erreurs          Code HTTP + corps :
+                 { "error": { "code": "INVALID_PHONE",
+                              "message": "Numéro invalide : 8 chiffres minimum.",
+                              "field": "phone" } }
+                 Le champ "message" est affiché tel quel sous le champ
+                 concerné : le rédiger en français.
+                 Codes HTTP utilisés : 400 données invalides · 401 non connecté
+                 ou jeton expiré · 403 interdit · 404 introuvable ·
+                 409 conflit (doublon) · 413 fichier trop lourd · 422 règle
+                 métier non respectée · 500 erreur serveur.
+Hors ligne       Si le serveur ne répond pas, l'app affiche le bandeau
+                 « Pas de connexion internet » et un bouton « Réessayer ».
+
+
+--------------------------------------------------------------------------------
+1. AUTHENTIFICATION ET COMPTES          (écrans : auth_flow.dart)
+--------------------------------------------------------------------------------
+
+POST   /auth/login                                                    public
+       Corps : { "identifier": "0712345602" | "sarah.m@mail.com",
+                 "password": "..." }
+       Renvoie : { "access_token", "refresh_token", "expires_in",
+                   "user": { "id", "role": "LANDLORD"|"TENANT", "name",
+                             "phone", "email", "city_id" } }
+       Le champ "role" décide quel espace l'app ouvre (bailleur ou locataire).
+       Erreurs : 401 INVALID_CREDENTIALS ·
+                 403 ACCOUNT_PENDING (locataire pas encore validé par le
+                 bailleur) · 403 ACCOUNT_REJECTED.
+
+POST   /auth/refresh                                                  public
+       Corps : { "refresh_token" }   Renvoie : { "access_token", "expires_in" }
+
+POST   /auth/logout
+       Corps : { "refresh_token" }   Renvoie : 204
+       (bouton « Se déconnecter » des paramètres)
+
+POST   /auth/password/forgot                                          public
+       Corps : { "identifier" }      Renvoie : 204 (toujours, même si le
+       compte n'existe pas). Envoie un lien ou un code par SMS / e-mail.
+       (écran « Mot de passe oublié »)
+
+POST   /auth/password/reset                                           public
+       Corps : { "token" | "code", "identifier", "new_password" }
+       Règle : 8 caractères minimum, dont un chiffre.
+
+GET    /me
+       Renvoie l'utilisateur connecté (même forme que "user" ci-dessus) +
+       pour un locataire : { "room_id", "room_number", "building_name",
+                             "city_name" }.
+
+PATCH  /me
+       Corps (champs facultatifs) : { "name", "phone", "email" }
+       (bouton « Modifier le profil »)
+
+POST   /me/password
+       Corps : { "current_password", "new_password" }
+
+POST   /me/devices                       (notifications push, à prévoir)
+       Corps : { "push_token", "platform": "android"|"ios"|"web" }
+
+--- Inscription d'un BAILLEUR ---
+
+POST   /auth/register/landlord                                        public
+       Corps : { "name", "phone", "email", "password" }
+       Renvoie : comme /auth/login (le compte est actif tout de suite).
+       Erreurs : 409 PHONE_TAKEN · 409 EMAIL_TAKEN.
+
+--- Inscription d'un LOCATAIRE (validée ensuite par le bailleur) ---
+
+GET    /cities?q=jardins                                              public
+       Recherche de cité (étape « Choisissez votre cité »).
+       Renvoie : [ { "id", "name", "area", "owner_name",
+                     "free_rooms_count" } ]
+
+GET    /cities/{city_id}/rooms/free                                   public
+       Chambres libres proposées dans la liste « Chambre ».
+       Renvoie : [ { "id", "number": "A-104", "type": "Studio",
+                     "rent": 45000 } ]
+
+POST   /auth/register/tenant                       public · multipart
+       Champs : name, phone, email, password, city_id, room_id,
+                cni_number, job, org (facultatif),
+                cni_photo (fichier JPG/PNG, recto lisible)
+       "job" ∈ Étudiant(e) · Salarié(e) · Fonctionnaire ·
+               Travailleur indépendant · Commerçant(e) ·
+               En recherche d’emploi · Autre
+       Renvoie : 201 { "registration_id", "status": "PENDING" }
+       Effet : crée une demande visible par le bailleur (section 3).
+       Le locataire ne peut pas se connecter avant la validation.
+
+
+--------------------------------------------------------------------------------
+2. BAILLEUR · TABLEAU DE BORD          (écran : Dashboard)          LANDLORD
+--------------------------------------------------------------------------------
+
+GET    /landlord/dashboard?month=2026-11
+       Renvoie :
+       {
+         "rents": { "collected": 1201755, "expected": 1425000,
+                    "unpaid": 165000, "unpaid_tenants": 4 },
+         "rooms": { "total": 48, "occupied": 44, "free": 4,
+                    "occupancy_rate": 92, "buildings": 3 },
+         "reports": { "pending": 6, "urgent": 2 },
+         "registrations_pending": 2,
+         "proofs_to_verify": 2,
+         "chart": [ { "month": "2026-06", "collected": 1410000 }, ... ]
+                  (6 derniers mois)
+       }
+
+
+--------------------------------------------------------------------------------
+3. BAILLEUR · DEMANDES D'INSCRIPTION                                LANDLORD
+--------------------------------------------------------------------------------
+
+GET    /landlord/registrations?status=PENDING
+       Renvoie : [ { "id", "name", "phone", "email", "cni_number",
+                     "cni_photo_url", "job", "org", "room_id",
+                     "room_number", "created_at" } ]
+
+POST   /landlord/registrations/{id}/approve
+       Effet : active le compte du locataire, lui attribue la chambre,
+       envoie un SMS. Renvoie : { "tenant_id" }
+
+POST   /landlord/registrations/{id}/reject
+       Corps (facultatif) : { "reason" }
+       Effet : SMS au demandeur. Renvoie : 204
+
+
+--------------------------------------------------------------------------------
+4. BAILLEUR · LOCATAIRES        (écrans : TenantsScreen, TenantDetail,
+                                 AddTenant)                         LANDLORD
+--------------------------------------------------------------------------------
+
+GET    /landlord/tenants?q=david&status=all|ok|late&building=A
+       Recherche (nom ou chambre), filtre « À jour / En retard »,
+       filtre par immeuble.
+       Renvoie : [ TenantSummary ]
+       TenantSummary = { "id", "name", "initials", "room_number",
+                         "building", "rent", "paid_this_month",
+                         "status": "paid"|"partial"|"late",
+                         "days_late", "has_proof_to_verify",
+                         "proof_amount" }
+
+GET    /landlord/tenants/{id}
+       Renvoie : TenantSummary + { "job", "org", "phone", "email",
+                 "since", "lease": { "start", "end", "months",
+                 "free_months" }, "id_document": { "type", "number",
+                 "photo_url" }, "emergency_contact", "note" }
+
+GET    /landlord/tenants/{id}/rents
+       Historique des loyers (6 derniers mois ou paginé).
+       Renvoie : [ { "month": "2026-10", "amount", "paid", "paid_on",
+                     "status", "receipt_available": true } ]
+
+POST   /landlord/tenants
+       Ajout manuel d'un locataire (formulaire « Ajouter un locataire »).
+       Corps : { "name", "phone", "id_number", "room_id",
+                 "start_date": "2026-12-01",
+                 "duration_months": 1..12,
+                 "free_months": 0..(duration_months - 1) }
+       Règles : chambre libre obligatoire ; au moins un mois payé
+                (free_months < duration_months) ; les mois offerts sont
+                les premiers du bail ; caution = 1 mois de loyer.
+       Effet : SMS d'invitation au locataire (installer l'app, se
+               connecter avec son numéro).
+       Renvoie : 201 { "id" }
+       Erreurs : 409 ROOM_NOT_FREE · 409 PHONE_TAKEN · 422 INVALID_FREE_MONTHS
+
+PATCH  /landlord/tenants/{id}/note
+       Corps : { "note": "Préfère être contacté par message après 18 h." }
+
+POST   /landlord/tenants/{id}/remind
+       Relance de loyer par SMS. Renvoie : 204
+
+GET    /landlord/tenants/{id}/id-document
+       URL signée (durée courte) de la photo de la pièce d'identité.
+
+
+--------------------------------------------------------------------------------
+5. BAILLEUR · IMMEUBLES ET CHAMBRES  (écrans : landlord_buildings.dart)
+                                                                    LANDLORD
+--------------------------------------------------------------------------------
+
+GET    /landlord/buildings
+       Renvoie : [ { "id": "A", "name": "Les Lauriers", "address",
+                     "floors", "rooms", "occupied", "late",
+                     "occupancy_rate" } ]
+
+POST   /landlord/buildings
+       Corps : { "name", "address", "floors" }
+       (bouton « Ajouter un immeuble », aujourd'hui non branché)
+
+GET    /landlord/buildings/{id}
+       Plan des chambres, étage par étage :
+       { ..., "floors": [ { "floor": 3, "rooms": [ RoomSummary ] } ] }
+       RoomSummary = { "id", "number": "A-301", "floor",
+                       "status": "free"|"occ"|"works"|"late",
+                       "tenant_name", "rent" }
+       Note : "late" = chambre occupée dont le loyer du mois n'est pas
+       entièrement payé (calculé côté serveur).
+
+GET    /landlord/rooms/{id}
+       Renvoie : RoomSummary + { "type": "Simple"|"Studio"|"Appartement",
+                 "equipment": [ "Lit", "Bureau", ... ],
+                 "tenant": TenantSummary | null,
+                 "history": [ { "tenant_name", "from", "to", "months" } ] }
+
+POST   /landlord/buildings/{id}/rooms
+       Corps : { "number", "floor", "type", "rent", "equipment": [...],
+                 "status": "free"|"works" }
+       Équipements possibles : Lit, Bureau, Armoire, Ventilateur,
+       Climatisation, Douche interne, Cuisine équipée, Compteur prépayé, Wi-Fi.
+       Erreurs : 409 ROOM_NUMBER_TAKEN
+
+PATCH  /landlord/rooms/{id}
+       Mêmes champs, tous facultatifs (« Modifier la chambre »).
+
+DELETE /landlord/rooms/{id}
+       Refusé (422 ROOM_OCCUPIED) si un locataire y habite.
+
+
+--------------------------------------------------------------------------------
+6. BAILLEUR · LOYERS ET JUSTIFICATIFS  (écrans : RentsScreen,
+                                        vérification du justificatif)
+                                                                    LANDLORD
+--------------------------------------------------------------------------------
+
+GET    /landlord/rents?month=2026-11&status=all|paid|partial|late&building=B
+       Renvoie : { "expected", "paid",
+                   "counts": { "paid", "partial", "late" },
+                   "items": [ TenantSummary + { "method", "paid_on" } ] }
+
+GET    /landlord/proofs?status=PENDING
+       Justificatifs envoyés par les locataires, à vérifier.
+       Renvoie : [ { "id", "tenant_id", "tenant_name", "room_number",
+                     "month", "amount", "file_url", "sent_at",
+                     "due_before": 45000 } ]
+
+POST   /landlord/proofs/{id}/approve
+       Effet : ajoute le montant au loyer du mois (sans dépasser le loyer),
+       génère la quittance, prévient le locataire.
+       Renvoie : { "tenant_paid": 45000, "status": "paid" }
+
+POST   /landlord/proofs/{id}/reject
+       Corps (facultatif) : { "reason" }
+       Effet : prévient le locataire. Renvoie : 204
+
+--- Quittances et fiches PDF ---
+Aujourd'hui, l'app génère elle-même les PDF (lib/services/pdf_docs.dart) à
+partir des données reçues : ces endpoints sont FACULTATIFS. Ils deviennent
+utiles si les PDF doivent être identiques partout, archivés ou signés.
+
+GET    /landlord/tenants/{id}/receipts/{month}.pdf      (quittance d'un mois)
+GET    /landlord/receipts/{month}.pdf                    (toutes, du mois)
+GET    /landlord/tenants/{id}/sheet.pdf                  (fiche locataire)
+GET    /landlord/tenants/sheets.pdf                      (dossier complet)
+
+
+--------------------------------------------------------------------------------
+7. BAILLEUR · SIGNALEMENTS     (écrans : ReportsScreen, ReportDetail)
+                                                                    LANDLORD
+--------------------------------------------------------------------------------
+
+GET    /landlord/reports?status=new|doing|done
+       Renvoie : [ ReportSummary ]
+       ReportSummary = { "id", "title", "category", "room",
+                         "tenant_name", "tenant_id",
+                         "urgency": "urgent"|"mid"|"low",
+                         "status": "new"|"doing"|"done",
+                         "technician_id", "technician_label",
+                         "photo_urls": [...], "created_at" }
+
+GET    /landlord/reports/{id}
+       Renvoie : ReportSummary + { "description",
+                 "messages": [ Message ] }
+       Message = { "id", "from": "landlord"|"tenant", "text", "sent_at" }
+
+PATCH  /landlord/reports/{id}
+       Corps (facultatifs) : { "status": "new"|"doing"|"done",
+                               "technician_id": "..." | null }
+       Règles : assigner un technicien à un signalement « new » le passe
+                en « doing » ; technician_id null = « Non assigné ».
+       Effet : notifie le locataire.
+
+GET    /reports/{id}/messages?after=<message_id>    (LANDLORD et TENANT)
+POST   /reports/{id}/messages                        (LANDLORD et TENANT)
+       Corps : { "text" }   Renvoie : Message
+       Discussion bailleur ⇄ locataire. Pour l'instantané, prévoir à terme
+       un WebSocket ou des notifications push ; sinon l'app interroge
+       GET .../messages toutes les 10 à 15 s quand la discussion est ouverte.
+
+
+--------------------------------------------------------------------------------
+8. BAILLEUR · TECHNICIENS        (écran : landlord_techs.dart)      LANDLORD
+--------------------------------------------------------------------------------
+
+GET    /landlord/technicians
+       Renvoie : [ { "id", "name", "job", "phone", "active_jobs": 1 } ]
+       "label" affiché par l'app : « Bruno (plombier) ».
+
+POST   /landlord/technicians
+       Corps : { "name", "job", "phone" }
+       "job" ∈ Électricien · Plombier · Serrurier · Menuisier · Peintre ·
+               Maçon · Gardien · Agent d’entretien · Autre
+       Erreurs : 409 TECHNICIAN_EXISTS (même nom + même spécialité)
+
+PATCH  /landlord/technicians/{id}
+       Corps : { "name", "job", "phone" } (facultatifs)
+
+DELETE /landlord/technicians/{id}
+       Effet : ses signalements non résolus redeviennent « Non assigné ».
+       Renvoie : 204
+
+
+--------------------------------------------------------------------------------
+9. BAILLEUR · ANNONCES         (écran : AnnouncementsScreen)        LANDLORD
+--------------------------------------------------------------------------------
+
+GET    /landlord/announcements
+       Renvoie : [ { "id", "title", "body", "type", "target",
+                     "created_at", "read_count": 14, "recipients": 16 } ]
+
+GET    /landlord/announcements/recipients-count?target=all|A|B|C
+       Nombre de locataires qui recevront l'annonce
+       (« Sera envoyée à 44 locataires »).
+
+POST   /landlord/announcements
+       Corps : { "title", "body",
+                 "type": "water"|"power"|"meet"|"works"|"other",
+                 "target": "all" | "<building_id>" }
+       Effet : notification + SMS aux locataires ciblés.
+       Renvoie : 201 { "id", "recipients" }
+
+
+--------------------------------------------------------------------------------
+10. BAILLEUR · PARAMÈTRES      (écran : LandlordSettings)           LANDLORD
+--------------------------------------------------------------------------------
+
+GET    /landlord/settings
+PATCH  /landlord/settings
+       { "auto_reminder": true,      (relance SMS 3 jours après l'échéance)
+         "reminder_before_due": true,(rappel 3 jours avant l'échéance)
+         "report_alerts": true,      (notification à chaque signalement)
+         "sms_copy": true }          (copie SMS des alertes urgentes)
+
+
+================================================================================
+                              ESPACE LOCATAIRE
+================================================================================
+
+--------------------------------------------------------------------------------
+11. LOCATAIRE · ACCUEIL ET LOYER   (écrans : _Home, _Payments)       TENANT
+--------------------------------------------------------------------------------
+
+GET    /tenant/home
+       Tout ce qu'affiche l'accueil en un seul appel :
+       { "rent": RentStatus,
+         "open_reports": 1,
+         "unread_notifications": 2,
+         "latest_announcements": [ Announcement ] (3 maximum) }
+
+GET    /tenant/rent
+       RentStatus = { "month": "2026-11", "amount": 45000,
+                      "paid": 0, "balance": 45000,
+                      "status": "due"|"pending"|"paid",
+                      "due_date": "2026-11-05",
+                      "pending_proof_amount": null,
+                      "next_due_date": "2026-12-05",
+                      "paid_this_year": 450000,
+                      "late_this_year": 0 }
+       "pending" = justificatif envoyé, en attente du bailleur.
+       Mois offert : "status": "free", "amount": 0.
+
+GET    /tenant/rents
+       Historique : [ { "month", "amount", "paid_on", "proof_status",
+                        "status", "receipt_available" } ]
+
+POST   /tenant/proofs                                        multipart
+       Champs : month ("2026-11"), amount (entier FCFA),
+                file (photo du reçu, capture d'écran ou bordereau :
+                      JPG, PNG ou PDF ; 10 Mo maximum)
+       Renvoie : 201 { "id", "status": "PENDING" }
+       Effet : le loyer passe « En vérification », le bailleur est prévenu.
+       Erreurs : 400 INVALID_AMOUNT · 413 FILE_TOO_LARGE ·
+                 409 PROOF_ALREADY_PENDING
+
+GET    /tenant/receipts/{month}.pdf                    (facultatif, cf. § 6)
+GET    /tenant/lease.pdf                               (facultatif, cf. § 6)
+       Sinon, l'app a besoin des données du bail :
+GET    /tenant/lease
+       { "room_number", "building_name", "rent", "start", "end",
+         "months", "free_months", "signed_on", "landlord_name" }
+
+
+--------------------------------------------------------------------------------
+12. LOCATAIRE · SIGNALEMENTS    (écrans : signaler un problème,
+                                 _MyReports)                         TENANT
+--------------------------------------------------------------------------------
+
+POST   /tenant/reports                                       multipart
+       Champs : category, description (5 caractères minimum),
+                urgency ("low"|"mid"|"urgent"),
+                photos[] (0 à 3 images, facultatives)
+       "category" ∈ plumb (Plomberie) · elec (Électricité) ·
+                    lock (Serrure et porte) · clean (Propreté) ·
+                    sec (Sécurité) · neigh (Voisinage) · other (Autre)
+       Renvoie : 201 { "id", "status": "new" }
+       Effet : le bailleur est prévenu.
+
+GET    /tenant/reports
+       Renvoie : [ { "id", "title", "category", "created_at",
+                     "step": 1|2|3,   (1 envoyé · 2 pris en charge ·
+                                       3 résolu)
+                     "last_update": "Un technicien passera jeudi matin.",
+                     "rating": 0..5 } ]
+
+POST   /tenant/reports/{id}/rating
+       Corps : { "stars": 1..5 }
+       Règle : seulement si le signalement est résolu (sinon 422).
+
+Discussion : mêmes endpoints que § 7 (GET/POST /reports/{id}/messages).
+
+
+--------------------------------------------------------------------------------
+13. LOCATAIRE · MA CITÉ          (écran : _MyCity)                   TENANT
+--------------------------------------------------------------------------------
+
+GET    /tenant/announcements
+       Announcement = { "id", "title", "body", "type", "target_label":
+                        "Immeuble A", "created_at" }
+
+GET    /tenant/city
+       { "name", "rules": [ { "title", "text" } ],
+         "contacts": [ { "name", "role", "phone",
+                         "kind": "landlord"|"caretaker"|"emergency" } ] }
+       (règlement intérieur, bailleur, gardien, numéros d'urgence)
+
+
+--------------------------------------------------------------------------------
+14. LOCATAIRE · NOTIFICATIONS ET PARAMÈTRES  (écrans : _Notifs,
+                                              _Settings, _Profile)   TENANT
+--------------------------------------------------------------------------------
+
+GET    /notifications?page=1
+       (aussi utilisable par le bailleur)
+       Renvoie : [ { "id", "type", "title", "body", "created_at",
+                     "read": false,
+                     "target": "payments"|"myreports"|"city" } ]
+       "target" = écran que l'app ouvre quand on touche la notification.
+
+POST   /notifications/{id}/read                         Renvoie : 204
+POST   /notifications/read-all                          Renvoie : 204
+
+GET    /tenant/settings
+PATCH  /tenant/settings
+       { "rent_reminders": true, "report_updates": true,
+         "announcements": true, "sms": false }
+
+
+--------------------------------------------------------------------------------
+15. FICHIERS
+--------------------------------------------------------------------------------
+
+Les photos (CNI, reçus, signalements) ne doivent jamais être publiques.
+Le serveur renvoie des URL signées à durée courte (ex. 15 minutes) dans
+les champs *_url. Formats acceptés : JPG, PNG (et PDF pour les reçus).
+Taille maximale conseillée : 10 Mo par fichier.
+
+
+--------------------------------------------------------------------------------
+16. RÉCAPITULATIF (64 endpoints + 6 facultatifs)
+--------------------------------------------------------------------------------
+
+Public (9)   POST /auth/login · POST /auth/refresh ·
+             POST /auth/password/forgot · POST /auth/password/reset ·
+             POST /auth/register/landlord · POST /auth/register/tenant ·
+             GET /cities · GET /cities/{id}/rooms/free
+             (+ POST /auth/logout, connecté)
+
+Compte (4)   GET /me · PATCH /me · POST /me/password · POST /me/devices
+
+Bailleur (34)
+  Tableau de bord   GET /landlord/dashboard
+  Inscriptions      GET /landlord/registrations · POST …/{id}/approve ·
+                    POST …/{id}/reject
+  Locataires        GET /landlord/tenants · GET …/{id} · GET …/{id}/rents ·
+                    POST /landlord/tenants · PATCH …/{id}/note ·
+                    POST …/{id}/remind · GET …/{id}/id-document
+  Immeubles         GET /landlord/buildings · POST /landlord/buildings ·
+                    GET …/{id}
+  Chambres          GET /landlord/rooms/{id} · POST …/buildings/{id}/rooms ·
+                    PATCH /landlord/rooms/{id} · DELETE /landlord/rooms/{id}
+  Loyers            GET /landlord/rents · GET /landlord/proofs ·
+                    POST …/{id}/approve · POST …/{id}/reject
+  Signalements      GET /landlord/reports · GET …/{id} · PATCH …/{id}
+  Techniciens       GET · POST · PATCH · DELETE /landlord/technicians
+  Annonces          GET /landlord/announcements ·
+                    GET …/recipients-count · POST /landlord/announcements
+  Paramètres        GET · PATCH /landlord/settings
+
+Locataire (12)
+  Accueil / loyer   GET /tenant/home · GET /tenant/rent · GET /tenant/rents ·
+                    POST /tenant/proofs · GET /tenant/lease
+  Signalements      POST /tenant/reports · GET /tenant/reports ·
+                    POST /tenant/reports/{id}/rating
+  Ma cité           GET /tenant/announcements · GET /tenant/city
+  Paramètres        GET · PATCH /tenant/settings
+
+Communs (5)  GET /reports/{id}/messages · POST /reports/{id}/messages ·
+             GET /notifications · POST /notifications/{id}/read ·
+             POST /notifications/read-all
+
+Facultatifs (PDF côté serveur, 6)
+             GET /landlord/tenants/{id}/receipts/{month}.pdf ·
+             GET /landlord/receipts/{month}.pdf ·
+             GET /landlord/tenants/{id}/sheet.pdf ·
+             GET /landlord/tenants/sheets.pdf ·
+             GET /tenant/receipts/{month}.pdf · GET /tenant/lease.pdf
+
+
+--------------------------------------------------------------------------------
+17. TÂCHES AUTOMATIQUES CÔTÉ SERVEUR (pas d'endpoint, mais nécessaires)
+--------------------------------------------------------------------------------
+
+- Le 2 de chaque mois : rappel aux locataires dont le loyer n'est pas payé
+  (si « reminder_before_due » est activé chez le bailleur).
+- Le 8 de chaque mois : relance SMS des loyers impayés
+  (si « auto_reminder » est activé).
+- Chaque jour : calcul des jours de retard (« days_late ») et du statut
+  "late" des chambres.
+- Mois offerts : ne pas réclamer de loyer ni relancer pendant ces mois.
+- Envoi des SMS (inscription validée/refusée, invitation d'un locataire
+  ajouté par le bailleur, annonces, alertes urgentes) via un fournisseur
+  SMS local.

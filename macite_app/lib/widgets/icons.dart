@@ -17,6 +17,8 @@ abstract final class PI {
   static const buildings = IconData(0xe105, fontFamily: 'PhosphorDuotone');
   static const calendar = IconData(0xe109, fontFamily: 'PhosphorDuotone');
   static const calendarBlank = IconData(0xe10b, fontFamily: 'PhosphorDuotone');
+  static const gift = IconData(0xe277, fontFamily: 'PhosphorDuotone');
+  static const hardHat = IconData(0xed47, fontFamily: 'PhosphorDuotone');
   static const camera = IconData(0xe10f, fontFamily: 'PhosphorDuotone');
   static const cameraPlus = IconData(0xec59, fontFamily: 'PhosphorDuotone');
   static const caretDown = IconData(0xe137, fontFamily: 'PhosphorDuotone');
@@ -49,7 +51,6 @@ abstract final class PI {
   static const gear = IconData(0xe271, fontFamily: 'PhosphorDuotone');
   static const globe = IconData(0xe289, fontFamily: 'PhosphorDuotone');
   static const handshake = IconData(0xe583, fontFamily: 'PhosphorDuotone');
-  static const hardHat = IconData(0xed47, fontFamily: 'PhosphorDuotone');
   static const hash = IconData(0xe2a3, fontFamily: 'PhosphorDuotone');
   static const hourglass = IconData(0xe2b3, fontFamily: 'PhosphorDuotone');
   static const hourglassHigh = IconData(0xe2b5, fontFamily: 'PhosphorDuotone');
@@ -127,6 +128,8 @@ const phSecondary = <int, IconData>{
   0xe105: IconData(0xe102, fontFamily: 'PhosphorDuotone'),
   0xe109: IconData(0xe108, fontFamily: 'PhosphorDuotone'),
   0xe10b: IconData(0xe10a, fontFamily: 'PhosphorDuotone'),
+  0xe277: IconData(0xe276, fontFamily: 'PhosphorDuotone'),
+  0xed47: IconData(0xed46, fontFamily: 'PhosphorDuotone'),
   0xe10f: IconData(0xe10e, fontFamily: 'PhosphorDuotone'),
   0xec59: IconData(0xec58, fontFamily: 'PhosphorDuotone'),
   0xe137: IconData(0xe136, fontFamily: 'PhosphorDuotone'),
@@ -159,7 +162,6 @@ const phSecondary = <int, IconData>{
   0xe271: IconData(0xe270, fontFamily: 'PhosphorDuotone'),
   0xe289: IconData(0xe288, fontFamily: 'PhosphorDuotone'),
   0xe583: IconData(0xe582, fontFamily: 'PhosphorDuotone'),
-  0xed47: IconData(0xed46, fontFamily: 'PhosphorDuotone'),
   0xe2a3: IconData(0xe2a2, fontFamily: 'PhosphorDuotone'),
   0xe2b3: IconData(0xe2b2, fontFamily: 'PhosphorDuotone'),
   0xe2b5: IconData(0xe2b4, fontFamily: 'PhosphorDuotone'),

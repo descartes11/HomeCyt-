@@ -1,0 +1,731 @@
+{
+  "title": "MaCité — Endpoints API nécessaires au backend",
+  "version": "1",
+  "date": "2026-11-13",
+  "description": "Appels HTTP dont l'application Flutter MaCité a besoin pour remplacer ses données de démonstration (lib/features/*/..._store.dart) par un vrai serveur.",
+  "conventions": {
+    "baseUrl": "https://<domaine>/api/v1",
+    "format": "JSON (UTF-8) ; envoi de fichiers en multipart/form-data",
+    "authentication": "En-tête Authorization: Bearer <access_token>, sauf endpoints publics",
+    "roles": {
+      "LANDLORD": "Bailleur : ne voit que sa cité",
+      "TENANT": "Locataire : ne voit que ses données et celles de sa cité"
+    },
+    "amounts": "Entiers en FCFA (ex. 45000), jamais de décimales",
+    "dates": "ISO 8601 (ex. \"2026-11-04T09:12:00Z\", \"2026-12-01\") ; l'app gère l'affichage en français",
+    "phones": "Chiffres sans espaces (ex. \"0712345602\") ; l'app retire les espaces avant envoi",
+    "months": "Format \"AAAA-MM\" (ex. \"2026-11\") pour les loyers",
+    "pagination": {
+      "query": "?page=1&per_page=20",
+      "response": { "items": [], "page": 1, "per_page": 20, "total": 48 }
+    },
+    "errors": {
+      "format": {
+        "error": {
+          "code": "INVALID_PHONE",
+          "message": "Numéro invalide : 8 chiffres minimum.",
+          "field": "phone"
+        }
+      },
+      "note": "Le champ message est affiché tel quel sous le champ concerné : le rédiger en français.",
+      "httpCodes": {
+        "400": "Données invalides",
+        "401": "Non connecté ou jeton expiré",
+        "403": "Interdit",
+        "404": "Introuvable",
+        "409": "Conflit (doublon)",
+        "413": "Fichier trop lourd",
+        "422": "Règle métier non respectée",
+        "500": "Erreur serveur"
+      }
+    },
+    "offline": "Si le serveur ne répond pas, l'app affiche « Pas de connexion internet » et un bouton « Réessayer »."
+  },
+  "schemas": {
+    "User": {
+      "id": "string",
+      "role": "LANDLORD | TENANT",
+      "name": "string",
+      "phone": "string",
+      "email": "string",
+      "city_id": "string"
+    },
+    "TenantSummary": {
+      "id": "string",
+      "name": "string",
+      "initials": "string",
+      "room_number": "string",
+      "building": "string",
+      "rent": "int",
+      "paid_this_month": "int",
+      "status": "paid | partial | late",
+      "days_late": "int | null",
+      "has_proof_to_verify": "bool",
+      "proof_amount": "int | null"
+    },
+    "RoomSummary": {
+      "id": "string",
+      "number": "string (ex. A-301)",
+      "floor": "int",
+      "status": "free | occ | works | late",
+      "tenant_name": "string | null",
+      "rent": "int",
+      "_note": "late = chambre occupée dont le loyer du mois n'est pas entièrement payé (calculé côté serveur)"
+    },
+    "ReportSummary": {
+      "id": "string",
+      "title": "string",
+      "category": "string",
+      "room": "string",
+      "tenant_name": "string",
+      "tenant_id": "string | null",
+      "urgency": "urgent | mid | low",
+      "status": "new | doing | done",
+      "technician_id": "string | null",
+      "technician_label": "string | null (ex. « Bruno (plombier) »)",
+      "photo_urls": "string[]",
+      "created_at": "datetime"
+    },
+    "Message": {
+      "id": "string",
+      "from": "landlord | tenant",
+      "text": "string",
+      "sent_at": "datetime"
+    },
+    "RentStatus": {
+      "month": "AAAA-MM",
+      "amount": "int (0 pour un mois offert)",
+      "paid": "int",
+      "balance": "int",
+      "status": "due | pending | paid | free",
+      "due_date": "date",
+      "pending_proof_amount": "int | null",
+      "next_due_date": "date",
+      "paid_this_year": "int",
+      "late_this_year": "int",
+      "_note": "pending = justificatif envoyé, en attente du bailleur"
+    },
+    "Announcement": {
+      "id": "string",
+      "title": "string",
+      "body": "string",
+      "type": "water | power | meet | works | other",
+      "target_label": "string (ex. Immeuble A)",
+      "created_at": "datetime"
+    },
+    "Notification": {
+      "id": "string",
+      "type": "string",
+      "title": "string",
+      "body": "string",
+      "created_at": "datetime",
+      "read": "bool",
+      "target": "payments | myreports | city (écran ouvert au toucher)"
+    }
+  },
+  "enums": {
+    "tenantJobs": ["Étudiant(e)", "Salarié(e)", "Fonctionnaire", "Travailleur indépendant", "Commerçant(e)", "En recherche d’emploi", "Autre"],
+    "roomTypes": ["Simple", "Studio", "Appartement"],
+    "roomEquipment": ["Lit", "Bureau", "Armoire", "Ventilateur", "Climatisation", "Douche interne", "Cuisine équipée", "Compteur prépayé", "Wi-Fi"],
+    "technicianJobs": ["Électricien", "Plombier", "Serrurier", "Menuisier", "Peintre", "Maçon", "Gardien", "Agent d’entretien", "Autre"],
+    "reportCategories": {
+      "plumb": "Plomberie",
+      "elec": "Électricité",
+      "lock": "Serrure et porte",
+      "clean": "Propreté",
+      "sec": "Sécurité",
+      "neigh": "Voisinage",
+      "other": "Autre"
+    },
+    "reportUrgency": ["low", "mid", "urgent"],
+    "reportStatus": ["new", "doing", "done"],
+    "announcementTypes": ["water", "power", "meet", "works", "other"]
+  },
+  "sections": [
+    {
+      "id": 1,
+      "name": "Authentification et comptes",
+      "screens": ["auth_flow.dart"],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/auth/login",
+          "public": true,
+          "body": { "identifier": "0712345602 | sarah.m@mail.com", "password": "string" },
+          "response": { "access_token": "string", "refresh_token": "string", "expires_in": "int", "user": "User" },
+          "notes": ["Le champ user.role décide quel espace l'app ouvre (bailleur ou locataire)."],
+          "errors": {
+            "401": "INVALID_CREDENTIALS",
+            "403": ["ACCOUNT_PENDING (locataire pas encore validé)", "ACCOUNT_REJECTED"]
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/auth/refresh",
+          "public": true,
+          "body": { "refresh_token": "string" },
+          "response": { "access_token": "string", "expires_in": "int" }
+        },
+        {
+          "method": "POST",
+          "path": "/auth/logout",
+          "body": { "refresh_token": "string" },
+          "response": "204",
+          "usedBy": "Bouton « Se déconnecter »"
+        },
+        {
+          "method": "POST",
+          "path": "/auth/password/forgot",
+          "public": true,
+          "body": { "identifier": "string" },
+          "response": "204 (toujours, même si le compte n'existe pas)",
+          "effects": ["Envoie un lien ou un code par SMS / e-mail."],
+          "usedBy": "Écran « Mot de passe oublié »"
+        },
+        {
+          "method": "POST",
+          "path": "/auth/password/reset",
+          "public": true,
+          "body": { "token | code": "string", "identifier": "string", "new_password": "string" },
+          "rules": ["8 caractères minimum, dont un chiffre."]
+        },
+        {
+          "method": "GET",
+          "path": "/me",
+          "response": {
+            "...": "User",
+            "room_id": "string (locataire)",
+            "room_number": "string (locataire)",
+            "building_name": "string (locataire)",
+            "city_name": "string (locataire)"
+          }
+        },
+        {
+          "method": "PATCH",
+          "path": "/me",
+          "body": { "name": "string?", "phone": "string?", "email": "string?" },
+          "usedBy": "Bouton « Modifier le profil »"
+        },
+        {
+          "method": "POST",
+          "path": "/me/password",
+          "body": { "current_password": "string", "new_password": "string" }
+        },
+        {
+          "method": "POST",
+          "path": "/me/devices",
+          "body": { "push_token": "string", "platform": "android | ios | web" },
+          "notes": ["Notifications push, à prévoir."]
+        },
+        {
+          "method": "POST",
+          "path": "/auth/register/landlord",
+          "public": true,
+          "body": { "name": "string", "phone": "string", "email": "string", "password": "string" },
+          "response": "Comme /auth/login (compte actif tout de suite)",
+          "errors": { "409": ["PHONE_TAKEN", "EMAIL_TAKEN"] }
+        },
+        {
+          "method": "GET",
+          "path": "/cities",
+          "public": true,
+          "query": { "q": "string (ex. jardins)" },
+          "response": [{ "id": "string", "name": "string", "area": "string", "owner_name": "string", "free_rooms_count": "int" }],
+          "usedBy": "Inscription locataire, étape « Choisissez votre cité »"
+        },
+        {
+          "method": "GET",
+          "path": "/cities/{city_id}/rooms/free",
+          "public": true,
+          "response": [{ "id": "string", "number": "A-104", "type": "Studio", "rent": 45000 }],
+          "usedBy": "Liste « Chambre » de l'inscription locataire"
+        },
+        {
+          "method": "POST",
+          "path": "/auth/register/tenant",
+          "public": true,
+          "contentType": "multipart/form-data",
+          "body": {
+            "name": "string",
+            "phone": "string",
+            "email": "string",
+            "password": "string",
+            "city_id": "string",
+            "room_id": "string",
+            "cni_number": "string",
+            "job": "enum tenantJobs",
+            "org": "string? (facultatif)",
+            "cni_photo": "fichier JPG/PNG, recto lisible"
+          },
+          "response": { "status": 201, "registration_id": "string", "registration_status": "PENDING" },
+          "effects": ["Crée une demande visible par le bailleur (section 3)."],
+          "rules": ["Le locataire ne peut pas se connecter avant la validation."]
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Bailleur · Tableau de bord",
+      "role": "LANDLORD",
+      "screens": ["Dashboard"],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/landlord/dashboard",
+          "query": { "month": "2026-11" },
+          "response": {
+            "rents": { "collected": 1201755, "expected": 1425000, "unpaid": 165000, "unpaid_tenants": 4 },
+            "rooms": { "total": 48, "occupied": 44, "free": 4, "occupancy_rate": 92, "buildings": 3 },
+            "reports": { "pending": 6, "urgent": 2 },
+            "registrations_pending": 2,
+            "proofs_to_verify": 2,
+            "chart": [{ "month": "2026-06", "collected": 1410000 }],
+            "_note": "chart = 6 derniers mois"
+          }
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Bailleur · Demandes d'inscription",
+      "role": "LANDLORD",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/landlord/registrations",
+          "query": { "status": "PENDING" },
+          "response": [{
+            "id": "string", "name": "string", "phone": "string", "email": "string",
+            "cni_number": "string", "cni_photo_url": "string", "job": "string", "org": "string",
+            "room_id": "string", "room_number": "string", "created_at": "datetime"
+          }]
+        },
+        {
+          "method": "POST",
+          "path": "/landlord/registrations/{id}/approve",
+          "response": { "tenant_id": "string" },
+          "effects": ["Active le compte du locataire.", "Lui attribue la chambre.", "Envoie un SMS."]
+        },
+        {
+          "method": "POST",
+          "path": "/landlord/registrations/{id}/reject",
+          "body": { "reason": "string? (facultatif)" },
+          "response": "204",
+          "effects": ["SMS au demandeur."]
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "Bailleur · Locataires",
+      "role": "LANDLORD",
+      "screens": ["TenantsScreen", "TenantDetail", "AddTenant"],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/landlord/tenants",
+          "query": { "q": "string (nom ou chambre)", "status": "all | ok | late", "building": "A" },
+          "response": ["TenantSummary"]
+        },
+        {
+          "method": "GET",
+          "path": "/landlord/tenants/{id}",
+          "response": {
+            "...": "TenantSummary",
+            "job": "string",
+            "org": "string",
+            "phone": "string",
+            "email": "string",
+            "since": "date",
+            "lease": { "start": "date", "end": "date", "months": "int", "free_months": "int" },
+            "id_document": { "type": "string", "number": "string", "photo_url": "string" },
+            "emergency_contact": "string",
+            "note": "string"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/landlord/tenants/{id}/rents",
+          "response": [{ "month": "2026-10", "amount": "int", "paid": "int", "paid_on": "date", "status": "string", "receipt_available": true }],
+          "notes": ["Historique des 6 derniers mois, ou paginé."]
+        },
+        {
+          "method": "POST",
+          "path": "/landlord/tenants",
+          "usedBy": "Formulaire « Ajouter un locataire »",
+          "body": {
+            "name": "string",
+            "phone": "string",
+            "id_number": "string",
+            "room_id": "string",
+            "start_date": "2026-12-01",
+            "duration_months": "int 1..12",
+            "free_months": "int 0..(duration_months - 1)"
+          },
+          "rules": [
+            "Chambre libre obligatoire.",
+            "Au moins un mois payé (free_months < duration_months).",
+            "Les mois offerts sont les premiers du bail.",
+            "Caution = 1 mois de loyer."
+          ],
+          "effects": ["SMS d'invitation au locataire (installer l'app, se connecter avec son numéro)."],
+          "response": { "status": 201, "id": "string" },
+          "errors": { "409": ["ROOM_NOT_FREE", "PHONE_TAKEN"], "422": "INVALID_FREE_MONTHS" }
+        },
+        {
+          "method": "PATCH",
+          "path": "/landlord/tenants/{id}/note",
+          "body": { "note": "Préfère être contacté par message après 18 h." }
+        },
+        {
+          "method": "POST",
+          "path": "/landlord/tenants/{id}/remind",
+          "response": "204",
+          "effects": ["Relance de loyer par SMS."]
+        },
+        {
+          "method": "GET",
+          "path": "/landlord/tenants/{id}/id-document",
+          "response": "URL signée (durée courte) de la photo de la pièce d'identité"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "Bailleur · Immeubles et chambres",
+      "role": "LANDLORD",
+      "screens": ["landlord_buildings.dart"],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/landlord/buildings",
+          "response": [{ "id": "A", "name": "Les Lauriers", "address": "string", "floors": "int", "rooms": "int", "occupied": "int", "late": "int", "occupancy_rate": "int" }]
+        },
+        {
+          "method": "POST",
+          "path": "/landlord/buildings",
+          "body": { "name": "string", "address": "string", "floors": "int" },
+          "notes": ["Bouton « Ajouter un immeuble », aujourd'hui non branché."]
+        },
+        {
+          "method": "GET",
+          "path": "/landlord/buildings/{id}",
+          "response": { "...": "infos de l'immeuble", "floors": [{ "floor": 3, "rooms": ["RoomSummary"] }] },
+          "notes": ["Plan des chambres, étage par étage."]
+        },
+        {
+          "method": "GET",
+          "path": "/landlord/rooms/{id}",
+          "response": {
+            "...": "RoomSummary",
+            "type": "enum roomTypes",
+            "equipment": "enum roomEquipment[]",
+            "tenant": "TenantSummary | null",
+            "history": [{ "tenant_name": "string", "from": "date", "to": "date", "months": "int" }]
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/landlord/buildings/{id}/rooms",
+          "body": { "number": "string", "floor": "int", "type": "enum roomTypes", "rent": "int", "equipment": "enum roomEquipment[]", "status": "free | works" },
+          "errors": { "409": "ROOM_NUMBER_TAKEN" }
+        },
+        {
+          "method": "PATCH",
+          "path": "/landlord/rooms/{id}",
+          "body": "Mêmes champs que la création, tous facultatifs",
+          "usedBy": "« Modifier la chambre »"
+        },
+        {
+          "method": "DELETE",
+          "path": "/landlord/rooms/{id}",
+          "errors": { "422": "ROOM_OCCUPIED (un locataire y habite)" }
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "name": "Bailleur · Loyers et justificatifs",
+      "role": "LANDLORD",
+      "screens": ["RentsScreen", "Vérification du justificatif"],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/landlord/rents",
+          "query": { "month": "2026-11", "status": "all | paid | partial | late", "building": "B" },
+          "response": {
+            "expected": "int",
+            "paid": "int",
+            "counts": { "paid": "int", "partial": "int", "late": "int" },
+            "items": [{ "...": "TenantSummary", "method": "string", "paid_on": "date" }]
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/landlord/proofs",
+          "query": { "status": "PENDING" },
+          "response": [{ "id": "string", "tenant_id": "string", "tenant_name": "string", "room_number": "string", "month": "AAAA-MM", "amount": "int", "file_url": "string", "sent_at": "datetime", "due_before": 45000 }]
+        },
+        {
+          "method": "POST",
+          "path": "/landlord/proofs/{id}/approve",
+          "response": { "tenant_paid": 45000, "status": "paid" },
+          "effects": ["Ajoute le montant au loyer du mois, sans dépasser le loyer.", "Génère la quittance.", "Prévient le locataire."]
+        },
+        {
+          "method": "POST",
+          "path": "/landlord/proofs/{id}/reject",
+          "body": { "reason": "string? (facultatif)" },
+          "response": "204",
+          "effects": ["Prévient le locataire."]
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "name": "Bailleur · Signalements",
+      "role": "LANDLORD",
+      "screens": ["ReportsScreen", "ReportDetail"],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/landlord/reports",
+          "query": { "status": "new | doing | done" },
+          "response": ["ReportSummary"]
+        },
+        {
+          "method": "GET",
+          "path": "/landlord/reports/{id}",
+          "response": { "...": "ReportSummary", "description": "string", "messages": ["Message"] }
+        },
+        {
+          "method": "PATCH",
+          "path": "/landlord/reports/{id}",
+          "body": { "status": "new | doing | done ?", "technician_id": "string | null ?" },
+          "rules": [
+            "Assigner un technicien à un signalement « new » le passe en « doing ».",
+            "technician_id null = « Non assigné »."
+          ],
+          "effects": ["Notifie le locataire."]
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "name": "Bailleur · Techniciens",
+      "role": "LANDLORD",
+      "screens": ["landlord_techs.dart"],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/landlord/technicians",
+          "response": [{ "id": "string", "name": "string", "job": "string", "phone": "string", "active_jobs": 1 }],
+          "notes": ["Libellé affiché par l'app : « Bruno (plombier) »."]
+        },
+        {
+          "method": "POST",
+          "path": "/landlord/technicians",
+          "body": { "name": "string", "job": "enum technicianJobs", "phone": "string" },
+          "errors": { "409": "TECHNICIAN_EXISTS (même nom + même spécialité)" }
+        },
+        {
+          "method": "PATCH",
+          "path": "/landlord/technicians/{id}",
+          "body": { "name": "string?", "job": "string?", "phone": "string?" }
+        },
+        {
+          "method": "DELETE",
+          "path": "/landlord/technicians/{id}",
+          "response": "204",
+          "effects": ["Ses signalements non résolus redeviennent « Non assigné »."]
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "name": "Bailleur · Annonces",
+      "role": "LANDLORD",
+      "screens": ["AnnouncementsScreen"],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/landlord/announcements",
+          "response": [{ "id": "string", "title": "string", "body": "string", "type": "string", "target": "string", "created_at": "datetime", "read_count": 14, "recipients": 16 }]
+        },
+        {
+          "method": "GET",
+          "path": "/landlord/announcements/recipients-count",
+          "query": { "target": "all | A | B | C" },
+          "response": { "count": "int" },
+          "usedBy": "« Sera envoyée à 44 locataires »"
+        },
+        {
+          "method": "POST",
+          "path": "/landlord/announcements",
+          "body": { "title": "string", "body": "string", "type": "enum announcementTypes", "target": "all | <building_id>" },
+          "response": { "status": 201, "id": "string", "recipients": "int" },
+          "effects": ["Notification + SMS aux locataires ciblés."]
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "name": "Bailleur · Paramètres",
+      "role": "LANDLORD",
+      "screens": ["LandlordSettings"],
+      "endpoints": [
+        { "method": "GET", "path": "/landlord/settings", "response": "Settings ci-dessous" },
+        {
+          "method": "PATCH",
+          "path": "/landlord/settings",
+          "body": {
+            "auto_reminder": "bool (relance SMS 3 jours après l'échéance)",
+            "reminder_before_due": "bool (rappel 3 jours avant l'échéance)",
+            "report_alerts": "bool (notification à chaque signalement)",
+            "sms_copy": "bool (copie SMS des alertes urgentes)"
+          }
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "name": "Locataire · Accueil et loyer",
+      "role": "TENANT",
+      "screens": ["_Home", "_Payments"],
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/tenant/home",
+          "response": { "rent": "RentStatus", "open_reports": 1, "unread_notifications": 2, "latest_announcements": ["Announcement (3 maximum)"] },
+          "notes": ["Tout ce qu'affiche l'accueil en un seul appel."]
+        },
+        { "method": "GET", "path": "/tenant/rent", "response": "RentStatus" },
+        {
+          "method": "GET",
+          "path": "/tenant/rents",
+          "response": [{ "month": "AAAA-MM", "amount": "int", "paid_on": "date", "proof_status": "string", "status": "string", "receipt_available": "bool" }]
+        },
+        {
+          "method": "POST",
+          "path": "/tenant/proofs",
+          "contentType": "multipart/form-data",
+          "body": { "month": "2026-11", "amount": "int (FCFA)", "file": "photo du reçu, capture ou bordereau : JPG, PNG ou PDF, 10 Mo maximum" },
+          "response": { "status": 201, "id": "string", "proof_status": "PENDING" },
+          "effects": ["Le loyer passe « En vérification », le bailleur est prévenu."],
+          "errors": { "400": "INVALID_AMOUNT", "413": "FILE_TOO_LARGE", "409": "PROOF_ALREADY_PENDING" }
+        },
+        {
+          "method": "GET",
+          "path": "/tenant/lease",
+          "response": { "room_number": "string", "building_name": "string", "rent": "int", "start": "date", "end": "date", "months": "int", "free_months": "int", "signed_on": "date", "landlord_name": "string" },
+          "notes": ["Données nécessaires à l'app pour générer le PDF du bail."]
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "name": "Locataire · Signalements",
+      "role": "TENANT",
+      "screens": ["Signaler un problème", "_MyReports"],
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/tenant/reports",
+          "contentType": "multipart/form-data",
+          "body": { "category": "enum reportCategories (clé)", "description": "string (5 caractères minimum)", "urgency": "low | mid | urgent", "photos[]": "0 à 3 images, facultatives" },
+          "response": { "status": 201, "id": "string", "report_status": "new" },
+          "effects": ["Le bailleur est prévenu."]
+        },
+        {
+          "method": "GET",
+          "path": "/tenant/reports",
+          "response": [{ "id": "string", "title": "string", "category": "string", "created_at": "datetime", "step": "1 envoyé | 2 pris en charge | 3 résolu", "last_update": "Un technicien passera jeudi matin.", "rating": "int 0..5" }]
+        },
+        {
+          "method": "POST",
+          "path": "/tenant/reports/{id}/rating",
+          "body": { "stars": "int 1..5" },
+          "rules": ["Seulement si le signalement est résolu (sinon 422)."]
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "name": "Locataire · Ma cité",
+      "role": "TENANT",
+      "screens": ["_MyCity"],
+      "endpoints": [
+        { "method": "GET", "path": "/tenant/announcements", "response": ["Announcement"] },
+        {
+          "method": "GET",
+          "path": "/tenant/city",
+          "response": {
+            "name": "string",
+            "rules": [{ "title": "string", "text": "string" }],
+            "contacts": [{ "name": "string", "role": "string", "phone": "string", "kind": "landlord | caretaker | emergency" }]
+          }
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "name": "Locataire · Paramètres",
+      "role": "TENANT",
+      "screens": ["_Settings", "_Profile"],
+      "endpoints": [
+        { "method": "GET", "path": "/tenant/settings", "response": "Settings ci-dessous" },
+        {
+          "method": "PATCH",
+          "path": "/tenant/settings",
+          "body": { "rent_reminders": "bool", "report_updates": "bool", "announcements": "bool", "sms": "bool" }
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "name": "Communs (bailleur et locataire)",
+      "role": "LANDLORD | TENANT",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/reports/{id}/messages",
+          "query": { "after": "<message_id>" },
+          "response": ["Message"],
+          "notes": ["Discussion bailleur ⇄ locataire. À terme : WebSocket ou push ; sinon l'app interroge toutes les 10 à 15 s quand la discussion est ouverte."]
+        },
+        {
+          "method": "POST",
+          "path": "/reports/{id}/messages",
+          "body": { "text": "string" },
+          "response": "Message"
+        },
+        { "method": "GET", "path": "/notifications", "query": { "page": "int" }, "response": ["Notification"] },
+        { "method": "POST", "path": "/notifications/{id}/read", "response": "204" },
+        { "method": "POST", "path": "/notifications/read-all", "response": "204" }
+      ]
+    }
+  ],
+  "optionalPdfEndpoints": {
+    "note": "L'app génère aujourd'hui les PDF elle-même (lib/services/pdf_docs.dart). Ces endpoints deviennent utiles si les PDF doivent être identiques partout, archivés ou signés.",
+    "endpoints": [
+      { "method": "GET", "path": "/landlord/tenants/{id}/receipts/{month}.pdf", "description": "Quittance d'un mois", "role": "LANDLORD" },
+      { "method": "GET", "path": "/landlord/receipts/{month}.pdf", "description": "Toutes les quittances du mois", "role": "LANDLORD" },
+      { "method": "GET", "path": "/landlord/tenants/{id}/sheet.pdf", "description": "Fiche locataire", "role": "LANDLORD" },
+      { "method": "GET", "path": "/landlord/tenants/sheets.pdf", "description": "Dossier complet des locataires", "role": "LANDLORD" },
+      { "method": "GET", "path": "/tenant/receipts/{month}.pdf", "description": "Quittance du locataire", "role": "TENANT" },
+      { "method": "GET", "path": "/tenant/lease.pdf", "description": "Contrat de bail", "role": "TENANT" }
+    ]
+  },
+  "files": {
+    "privacy": "Les photos (CNI, reçus, signalements) ne doivent jamais être publiques : le serveur renvoie des URL signées à durée courte (ex. 15 minutes) dans les champs *_url.",
+    "formats": ["JPG", "PNG", "PDF (reçus uniquement)"],
+    "maxSizeMb": 10
+  },
+  "scheduledTasks": [
+    { "when": "Le 2 de chaque mois", "task": "Rappel aux locataires dont le loyer n'est pas payé", "condition": "reminder_before_due activé chez le bailleur" },
+    { "when": "Le 8 de chaque mois", "task": "Relance SMS des loyers impayés", "condition": "auto_reminder activé chez le bailleur" },
+    { "when": "Chaque jour", "task": "Calcul des jours de retard (days_late) et du statut late des chambres" },
+    { "when": "Chaque mois", "task": "Mois offerts : ne pas réclamer de loyer ni relancer pendant ces mois" },
+    { "when": "À l'événement", "task": "Envoi des SMS (inscription validée/refusée, invitation d'un locataire, annonces, alertes urgentes) via un fournisseur SMS local" }
+  ]
+}

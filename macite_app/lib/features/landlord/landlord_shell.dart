@@ -9,6 +9,7 @@ import 'landlord_buildings.dart';
 import 'landlord_reports.dart';
 import 'landlord_screens.dart';
 import 'landlord_store.dart';
+import 'landlord_techs.dart';
 
 /// Espace bailleur (Daniel A., Cité Les Jardins).
 class LandlordShell extends StatefulWidget {
@@ -43,7 +44,7 @@ class _LandlordShellState extends State<LandlordShell> {
 
   String get _mActive => switch (s.screen) {
     'tenant' => 'tenants',
-    'rents' || 'ann' || 'settings' => 'more',
+    'rents' || 'ann' || 'settings' || 'techs' => 'more',
     'buildings' || 'building' || 'room' || 'roomForm' => 'buildings',
     'reports' || 'report' => 'reports',
     final x => x,
@@ -83,7 +84,7 @@ class _LandlordShellState extends State<LandlordShell> {
                 s.atBack();
               case 'report':
                 s.go('reports');
-              case 'rents' || 'ann' || 'settings':
+              case 'rents' || 'ann' || 'settings' || 'techs':
                 s.go(wide ? 'dashboard' : 'more');
               default:
                 s.go('dashboard');
@@ -108,6 +109,7 @@ class _LandlordShellState extends State<LandlordShell> {
     'reports' => ReportsScreen(c),
     'report' => ReportDetail(c, chat: _chat),
     'ann' => AnnouncementsScreen(c),
+    'techs' => TechniciansScreen(c),
     'settings' => LandlordSettings(c),
     _ => Dashboard(c),
   };
@@ -117,6 +119,7 @@ class _LandlordShellState extends State<LandlordShell> {
     const noNav = ['tenant', 'room', 'roomForm', 'addTenant', 'report'];
     final fab = switch (s.screen) {
       'dashboard' || 'tenants' => ('Ajouter un locataire', () => s.newTenant()),
+      'techs' => ('Ajouter un technicien', () => openAddTech(context, s)),
       'buildings' => ('Ajouter un immeuble', () => s.toast('Formulaire « Ajouter un immeuble » : même structure que celui d’une chambre')),
       'building' => ('Ajouter une chambre', s.addRoom),
       _ => null,
@@ -191,6 +194,7 @@ class _LandlordShellState extends State<LandlordShell> {
               const NavItem('tenants', PI.users, 'Locataires'),
               const NavItem('rents', PI.money, 'Loyers et paiements'),
               NavItem('reports', PI.wrench, 'Signalements', count: s.pending.length),
+              const NavItem('techs', PI.hardHat, 'Techniciens'),
               const NavItem('ann', PI.megaphone, 'Annonces'),
               const NavItem('settings', PI.gear, 'Paramètres'),
             ],

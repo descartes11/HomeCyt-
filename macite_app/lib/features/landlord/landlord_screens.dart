@@ -1765,6 +1765,7 @@ class MoreScreen extends StatelessWidget {
             children: [
               item(PI.money, 'Loyers et paiements', () => s.go('rents', more: true)),
               item(PI.megaphone, 'Annonces', () => s.go('ann')),
+              item(PI.hardHat, 'Techniciens', () => s.go('techs')),
               item(PI.gear, 'Profil et paramètres', () => s.go('settings')),
             ],
           ),

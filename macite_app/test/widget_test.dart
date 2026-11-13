@@ -64,6 +64,35 @@ void main() {
     expect(pdfFileName('Quittance Sarah M. Août 2026'), 'Quittance-Sarah-M-Aout-2026.pdf');
   });
 
+  test('Bail : mois offerts toujours inférieurs à la durée', () {
+    final s = LandlordStore()..newTenant();
+    s.setDur(3);
+    s.setFree(5);
+    expect(s.at.free, 2); // au moins un mois payé
+    s.setDur(1);
+    expect(s.at.free, 0);
+    s.setDur(12);
+    s.setFree(1);
+    expect(freeLabel(1), '1 mois offert (décembre 2026)');
+    expect(freeLabel(2), '2 mois offerts (décembre 2026 – janvier 2027)');
+    s.dispose();
+  });
+
+  test('Techniciens : ajout, assignation, retrait', () {
+    final s = LandlordStore()..openReport('s1');
+    s.addTech('Moussa', 'Serrurier', '07 11 22 33 44', assign: true);
+    final m = s.techList.last;
+    expect(s.techs, contains('Moussa (serrurier)'));
+    expect(s.rep.tech, 'Moussa (serrurier)');
+    expect(s.rep.st, 'doing'); // un signalement assigné passe « En cours »
+    expect(s.activeJobs(m), 1);
+    expect(s.hasTech(' Moussa ', 'Serrurier'), isTrue);
+    s.removeTech(m);
+    expect(s.rep.tech, ''); // redevient « Non assigné »
+    expect(s.techs, isNot(contains('Moussa (serrurier)')));
+    s.dispose();
+  });
+
   test('Le profil choisi à l’inscription est retrouvé à la connexion', () async {
     TestWidgetsFlutterBinding.ensureInitialized();
     await Accounts.save(phone: '07 55 44 33 22', email: 'Awa@Mail.com', role: 'tenant');

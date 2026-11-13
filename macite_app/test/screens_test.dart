@@ -8,6 +8,7 @@ import 'package:macite/features/auth/auth_flow.dart';
 import 'package:macite/features/landing/landing_page.dart';
 import 'package:macite/features/landlord/landlord_shell.dart';
 import 'package:macite/features/landlord/landlord_store.dart';
+import 'package:macite/features/landlord/landlord_techs.dart';
 import 'package:macite/features/tenant/tenant_shell.dart';
 import 'package:macite/features/tenant/tenant_store.dart';
 import 'package:macite/theme/app_theme.dart';
@@ -121,6 +122,11 @@ void main() {
         s.at.room = 'A-104';
         s.atNext();
         await settle(t, 300);
+        // Étape « Bail » : durée en liste + mois offerts
+        s.setDur(6);
+        s.setFree(2);
+        await settle(t, 300);
+        expect(t.takeException(), isNull, reason: 'bail');
         s.atNext();
         await settle(t, 300);
         // Actions
@@ -137,6 +143,19 @@ void main() {
         await settle(t);
         s.setRepStatus('done');
         s.setTech('Bruno (plombier)');
+        // Techniciens : liste + formulaire d'ajout (feuille du bas ou dialogue)
+        s.go('techs');
+        await settle(t);
+        expect(t.takeException(), isNull, reason: 'techniciens');
+        openAddTech(t.element(find.byType(TechniciansScreen)), s);
+        await settle(t, 500);
+        expect(t.takeException(), isNull, reason: 'ajout technicien');
+        Navigator.of(t.element(find.byType(TechniciansScreen))).pop();
+        await settle(t, 500);
+        s.addTech('Moussa', 'Serrurier', '07 11 22 33 44');
+        await settle(t, 300);
+        s.openReport('s2');
+        await settle(t);
         s.sendChat('Bonjour');
         await settle(t, 2000);
         s.set(() => s.query = 'zzz');

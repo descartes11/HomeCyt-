@@ -6,6 +6,7 @@ import '../../widgets/anim.dart';
 import '../../widgets/ui.dart';
 import 'landlord_screens.dart';
 import 'landlord_store.dart';
+import 'landlord_techs.dart';
 
 class ReportsScreen extends StatelessWidget {
   const ReportsScreen(this.c, {super.key});
@@ -116,7 +117,10 @@ class ReportsScreen extends StatelessWidget {
                           curve: kEase,
                           height: 3,
                           margin: const EdgeInsets.symmetric(horizontal: 16),
-                          color: s.rTab == t.$1 ? p.btn : Colors.transparent,
+                          decoration: BoxDecoration(
+                            color: s.rTab == t.$1 ? p.btn : Colors.transparent,
+                            borderRadius: const BorderRadius.vertical(top: Radius.circular(3)),
+                          ),
                         ),
                       ],
                     ),
@@ -328,13 +332,14 @@ class _ReportDetailState extends State<ReportDetail> with WidgetsBindingObserver
         ChipRow(
           wrap: true,
           children: [
-            for (final t in techs)
+            for (final t in s.techs)
               ChoiceChipX(
                 t,
                 icon: (r.tech.isEmpty ? 'Non assigné' : r.tech) == t ? PI.check : PI.user,
                 selected: (r.tech.isEmpty ? 'Non assigné' : r.tech) == t,
                 onTap: () => s.setTech(t),
               ),
+            ChoiceChipX('Nouveau technicien', icon: PI.plus, selected: false, onTap: () => openAddTech(context, s, assign: true)),
           ],
         ),
       ],
